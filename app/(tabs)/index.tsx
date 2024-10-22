@@ -1,70 +1,198 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+import { StatusBar } from "expo-status-bar";
+import { StyleSheet, Text, View, Image, Button, Platform } from "react-native";
+import * as Google from "expo-auth-session/providers/google";
+import { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as AuthSession from "expo-auth-session";
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+// expo add expo-auth-session expo-random expo-dev-client
+// expo add @react-native-async-storage/async-storage
 
-export default function HomeScreen() {
+/*
+  For testing expo-auth-session on iOS we need a standalone app 
+  which is why we install expo-dev-client
+  
+  If you don't have eas installed then install using the following command:
+  npm install -g eas-cli
+
+  eas login
+  eas build:configure
+
+  Build for local development on iOS or Android:
+  eas build -p ios --profile development --local
+  OR
+  eas build -p android --profile development --local
+
+  May need to install the following to build locally (which allows debugging)
+  npm install -g yarn
+  brew install fastlane
+
+  After building install on your device:
+  For iOS (simulator): https://docs.expo.dev/build-reference/simulators/
+  For Android: https://docs.expo.dev/build-reference/apk/
+
+  Run on installed app:
+  expo start --dev-client
+*/
+
+export default function App() {
+  const [userInfo, setUserInfo] = useState();
+  const [auth, setAuth] = useState();
+  const [requireRefresh, setRequireRefresh] = useState(false);
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    androidClientId:
+      "240935511186-o0fki68326e5fb1c3tb7t7q2t0jlc8o8.apps.googleusercontent.com",
+    iosClientId:
+      "240935511186-3pidrpobjpjg8br3gtir0cgmn8ptpovh.apps.googleusercontent.com",
+    expoClientId:
+      "240935511186-otf58tci8uthbekrk16j1jiu8isvchh3.apps.googleusercontent.com",
+  });
+
+  useEffect(() => {
+    console.log(response);
+    if (response?.type === "success") {
+      setAuth(response.authentication);
+
+      const persistAuth = async () => {
+        await AsyncStorage.setItem(
+          "auth",
+          JSON.stringify(response.authentication)
+        );
+      };
+      persistAuth();
+    }
+  }, [response]);
+
+  useEffect(() => {
+    const getPersistedAuth = async () => {
+      const jsonValue = await AsyncStorage.getItem("auth");
+      if (jsonValue != null) {
+        const authFromJson = JSON.parse(jsonValue);
+        setAuth(authFromJson);
+        console.log(authFromJson);
+
+        setRequireRefresh(
+          !AuthSession.TokenResponse.isTokenFresh({
+            expiresIn: authFromJson.expiresIn,
+            issuedAt: authFromJson.issuedAt,
+          })
+        );
+      }
+    };
+    getPersistedAuth();
+  }, []);
+
+  const getUserData = async () => {
+    let userInfoResponse = await fetch(
+      "https://www.googleapis.com/userinfo/v2/me",
+      {
+        headers: { Authorization: `Bearer ${auth.accessToken}` },
+      }
+    );
+
+    userInfoResponse.json().then((data) => {
+      console.log(data);
+      setUserInfo(data);
+    });
+  };
+
+  const showUserData = () => {
+    if (userInfo) {
+      return (
+        <View style={styles.userInfo}>
+          <Image source={{ uri: userInfo.picture }} style={styles.profilePic} />
+          <Text>Welcome {userInfo.name}</Text>
+          <Text>{userInfo.email}</Text>
+        </View>
+      );
+    }
+  };
+
+  const getClientId = () => {
+    if (Platform.OS === "ios") {
+      return "240935511186-3pidrpobjpjg8br3gtir0cgmn8ptpovh.apps.googleusercontent.com";
+    } else if (Platform.OS === "android") {
+      return "240935511186-o0fki68326e5fb1c3tb7t7q2t0jlc8o8.apps.googleusercontent.com";
+    } else {
+      console.log("Invalid platform - not handled");
+    }
+  };
+
+  const refreshToken = async () => {
+    const clientId = getClientId();
+    console.log(auth);
+    const tokenResult = await AuthSession.refreshAsync(
+      {
+        clientId: clientId,
+        refreshToken: auth.refreshToken,
+      },
+      {
+        tokenEndpoint: "https://www.googleapis.com/oauth2/v4/token",
+      }
+    );
+
+    tokenResult.refreshToken = auth.refreshToken;
+
+    setAuth(tokenResult);
+    await AsyncStorage.setItem("auth", JSON.stringify(tokenResult));
+    setRequireRefresh(false);
+  };
+
+  if (requireRefresh) {
+    return (
+      <View style={styles.container}>
+        <Text>Token requires refresh...</Text>
+        <Button title="Refresh Token" onPress={refreshToken} />
+      </View>
+    );
+  }
+
+  const logout = async () => {
+    await AuthSession.revokeAsync(
+      {
+        token: auth.accessToken,
+      },
+      {
+        revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+      }
+    );
+
+    setAuth(undefined);
+    setUserInfo(undefined);
+    await AsyncStorage.removeItem("auth");
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({ ios: 'cmd + d', android: 'cmd + m' })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <View style={styles.container}>
+      {showUserData()}
+      <Button
+        title={auth ? "Get User Data" : "Login"}
+        onPress={
+          auth
+            ? getUserData
+            : () => promptAsync({ useProxy: false, showInRecents: true })
+        }
+      />
+      {auth ? <Button title="Logout" onPress={logout} /> : undefined}
+      <StatusBar style="auto" />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  profilePic: {
+    width: 50,
+    height: 50,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  userInfo: {
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
